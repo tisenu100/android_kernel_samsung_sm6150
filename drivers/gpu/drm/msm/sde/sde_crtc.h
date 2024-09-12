@@ -438,7 +438,6 @@ struct sde_crtc_state {
 	u32 padding_dummy;
 
 	struct sde_crtc_respool rp;
-	bool color_invert_on;
 };
 
 enum sde_crtc_irq_state {
