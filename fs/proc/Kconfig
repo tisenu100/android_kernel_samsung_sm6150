@@ -121,3 +121,18 @@ config PROC_TRIGGER_SQLITE_BUG
 	bool "Trigger bug for SQLite debugging"
 	depends on PROC_FS
 	default y if !SAMSUNG_PRODUCT_SHIP
+
+config BOOTLOADER_ARGUMENTS_SPOOF
+	bool "Fool bootloader arguments"
+	depends on PROC_FS
+	default n
+	help
+	Spoofs bootloader arguments to pretend that our device runs on a locked bootloader.
+	
+config CONFIG_D1Q_SPOOF
+	bool "Galaxy S23 Bootloader arguments"
+	depends on BOOTLOADER_ARGUMENTS_SPOOF
+	default n
+	help
+	Makes the device think that it booted from a Galaxy S23 Bootloader. Use it only on Samsung official firmwares.
+	
