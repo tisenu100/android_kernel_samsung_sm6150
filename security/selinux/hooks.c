@@ -213,7 +213,10 @@ static int __init enforcing_setup(char *str)
 	unsigned long enforcing;
 	if (!kstrtoul(str, 0, &enforcing)) {
 // [ SEC_SELINUX_PORTING_COMMON
-#ifdef CONFIG_ALWAYS_ENFORCE
+#ifdef CONFIG_SECURITY_SELINUX_FORCE_PERMISSIVE
+		selinux_enforcing_boot = 0;
+		selinux_enforcing = 0;
+#elif CONFIG_ALWAYS_ENFORCE
 		selinux_enforcing_boot = 1;
 		selinux_enforcing = 1;
 #else
