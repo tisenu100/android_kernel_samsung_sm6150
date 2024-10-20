@@ -129,7 +129,7 @@ config BOOTLOADER_ARGUMENTS_SPOOF
 	help
 	Spoofs bootloader arguments to pretend that our device runs on a locked bootloader.
 	
-config CONFIG_D1Q_SPOOF
+config D1Q_SPOOF
 	bool "Galaxy S23 Bootloader arguments"
 	depends on BOOTLOADER_ARGUMENTS_SPOOF
 	default n

@@ -1226,9 +1226,16 @@ PHONY += $(vmlinux-dirs)
 $(vmlinux-dirs): prepare scripts
 	$(Q)$(MAKE) $(build)=$@ need-builtin=1
 
+ifdef CONFIG_D1Q_SPOOF
+define filechk_kernel.release
+	echo "5.15.123-android13-8-29539737-abS911BXXS6CXI4"
+endef
+else
 define filechk_kernel.release
 	echo "$(KERNELVERSION)$$($(CONFIG_SHELL) $(srctree)/scripts/setlocalversion $(srctree))"
 endef
+endif
+
 
 # Store (new) KERNELRELEASE string in include/config/kernel.release
 include/config/kernel.release: include/config/auto.conf FORCE
@@ -1873,8 +1880,13 @@ checkstack:
 	$(OBJDUMP) -d vmlinux $$(find . -name '*.ko') | \
 	$(PERL) $(src)/scripts/checkstack.pl $(CHECKSTACK_ARCH)
 
+ifdef CONFIG_D1Q_SPOOF
+kernelrelease:
+	@echo "5.15.123-android13-8-29539737-abS911BXXS6CXI4"
+else
 kernelrelease:
 	@echo "$(KERNELVERSION)$$($(CONFIG_SHELL) $(srctree)/scripts/setlocalversion $(srctree))"
+endif
 
 kernelversion:
 	@echo $(KERNELVERSION)

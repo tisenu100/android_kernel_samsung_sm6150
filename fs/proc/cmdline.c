@@ -50,7 +50,7 @@ static void patch_bootloader_arguments(char *cmd)
 	
 #ifdef CONFIG_D1Q_SPOOF
         patch_flag(cmd, "androidboot.em.model=", "SM-S911B ");
-	patch_flag(cmd, "androidboot.bootloader=", "S911BXXS6CXHA");
+	patch_flag(cmd, "androidboot.bootloader=", "S911BXXS6CXI4");
 	patch_flag(cmd, "androidboot.product.model=", "SM-S911B ");
 #endif
 }
