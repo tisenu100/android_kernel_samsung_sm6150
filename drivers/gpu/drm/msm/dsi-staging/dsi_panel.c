@@ -48,38 +48,6 @@
 #define DEFAULT_PANEL_PREFILL_LINES	25
 #define TICKS_IN_MICRO_SECOND		1000000
 
-struct bda {
-    u32 brightness;
-    u32 dim_alpha;
-};
-
-struct bda fod_dim_lut[] = {
-	{0, 0xFF},
-	{1, 0xEC},
-	{2, 0xE6},
-	{3, 0xE0},
-	{4, 0xDC},
-	{6, 0xD5},
-	{10, 0xCA},
-	{20, 0xB7},
-	{21, 0xB5},
-	{30, 0xA8},
-	{42, 0x9A},
-	{63, 0x85},
-	{84, 0x74},
-	{105, 0x65},
-	{126, 0x58},
-	{147, 0x4C},
-	{168, 0x40},
-	{189, 0x36},
-	{210, 0x2C},
-	{231, 0x23},
-	{252, 0x1A},
-	{273, 0x11},
-	{294, 0x9},
-	{315, 0x1},
-};
-
 enum dsi_dsc_ratio_type {
 	DSC_8BPC_8BPP,
 	DSC_10BPC_8BPP,
@@ -397,6 +365,15 @@ static int dsi_panel_reset(struct dsi_panel *panel)
 	struct dsi_panel_reset_config *r_config = &panel->reset_config;
 	int i;
 
+#if defined(CONFIG_DISPLAY_SAMSUNG_LEGO)
+	struct samsung_display_driver_data *vdd = panel->panel_private;
+
+	if (vdd->aot_reset_regulator || vdd->aot_reset_regulator_late) {
+		pr_err("Not here, if reset_regulator enabled\n");
+		goto exit;
+	}
+#endif
+
 	if (gpio_is_valid(panel->reset_config.disp_en_gpio)) {
 		rc = gpio_direction_output(panel->reset_config.disp_en_gpio, 1);
 		if (rc) {
@@ -452,7 +429,95 @@ exit:
 	return rc;
 }
 
-#if defined(CONFIG_DISPLAY_SAMSUNG) || defined(CONFIG_DISPLAY_SAMSUNG_LEGO)
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+int dsi_panel_set_pinctrl_state(struct dsi_panel *panel, bool enable)
+#elif defined(CONFIG_DISPLAY_SAMSUNG_LEGO)
+/* Reset regulater control when aot_reset_regulator enabled
+ * regulator name should be "panel_reset" or "lcd_rst"
+ */
+static int dsi_panel_reset_regulator(struct dsi_panel *panel, bool enable)
+{
+	int rc = 0;
+	struct dsi_panel_reset_config *r_config = &panel->reset_config;
+	int i;
+	struct dsi_vreg *vreg;
+	u32 pre_on_ms, post_on_ms;
+	u32 pre_off_ms, post_off_ms;
+
+	/* Find number of "panel-reset" supply-name order among qcom,panel-supply-entries */
+	for (i = 0; i < panel->power_info.count; i++) {
+		if (!strcmp((panel->power_info.vregs + i)->vreg_name, "panel_reset") ||
+				!strcmp((panel->power_info.vregs + i)->vreg_name, "lcd_rst"))
+			break;
+	}
+
+	if (i == panel->power_info.count) {
+		pr_err("Could not find reset regulator name, i:%d\n", i);
+		goto exit;
+	} else {
+		pr_info("name [%s] at %dth(0~%d) enable:%d\n",
+			(panel->power_info.vregs + i)->vreg_name, i, panel->power_info.count - 1, enable);
+	}
+
+	vreg = panel->power_info.vregs + i;
+	if (!vreg) {
+		pr_err("i th vregs is invalid, rc=%d\n", rc);
+		goto exit;
+	}
+
+	if (enable) { /* Enable RESET with sequence*/
+		pre_on_ms = vreg->pre_on_sleep;
+		post_on_ms = vreg->post_on_sleep;
+
+		if (pre_on_ms)
+			usleep_range((pre_on_ms * 1000), (pre_on_ms * 1000) + 10);
+
+		for (i = 0; i < r_config->count; i++) {
+			if (r_config->sequence[i].level) {
+				rc = regulator_enable(vreg->vreg);
+				if (rc) {
+					pr_err("enable failed for %s, rc=%d\n",
+						   vreg->vreg_name, rc);
+				}
+			} else {
+				rc = regulator_disable(vreg->vreg);
+				if (rc) {
+					pr_err("disable failed for %s, rc=%d\n",
+						   vreg->vreg_name, rc);
+				}
+			}
+
+			if (r_config->sequence[i].sleep_ms)
+				usleep_range(r_config->sequence[i].sleep_ms * 1000,
+					(r_config->sequence[i].sleep_ms * 1000) + 100);
+		}
+
+		if (post_on_ms)
+			usleep_range((post_on_ms * 1000), (post_on_ms * 1000) + 10);
+	} else {
+		/* Disable RESET */
+		pre_off_ms = vreg->pre_off_sleep;
+		post_off_ms = vreg->post_off_sleep;
+		if (pre_off_ms)
+			usleep_range((pre_off_ms * 1000), (pre_off_ms * 1000) + 10);
+
+		rc = regulator_disable(vreg->vreg);
+		if (rc) {
+			pr_err("disable failed for %s, rc=%d\n",
+				   vreg->vreg_name, rc);
+		}
+
+		if (post_off_ms)
+			usleep_range((post_off_ms * 1000), (post_off_ms * 1000) + 10);
+
+		if (regulator_is_enabled(vreg->vreg))
+			pr_info("%s is still enabled.\n", vreg->vreg_name);
+	}
+
+exit:
+	return rc;
+}
+
 int dsi_panel_set_pinctrl_state(struct dsi_panel *panel, bool enable)
 #else
 static int dsi_panel_set_pinctrl_state(struct dsi_panel *panel, bool enable)
@@ -544,16 +609,36 @@ static int dsi_panel_power_on(struct dsi_panel *panel)
 		pr_err("[%s] failed to set pinctrl, rc=%d\n", panel->name, rc);
 		goto error_disable_vregs;
 	}
-	if(!vdd->dtsi_data.samsung_reset_after_dsi_on)
-	{
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	if (!vdd->dtsi_data.samsung_reset_after_dsi_on) {
 		rc = dsi_panel_reset(panel);
 		if (rc) {
 			pr_err("[%s] failed to reset panel, rc=%d\n", panel->name, rc);
 			goto error_disable_gpio;
 		}
 	}
-#if defined(CONFIG_DISPLAY_SAMSUNG_LEGO)
+#elif defined(CONFIG_DISPLAY_SAMSUNG_LEGO)
+	/* Call reset_regulator func here
+	 * if aot_reset_regulator is true
+	 * not aot_reset_regulator_late
+	 */
+	if (vdd->aot_reset_regulator)
+		rc = dsi_panel_reset_regulator(panel, true);
+	else if (!vdd->aot_reset_regulator_late)
+		rc = dsi_panel_reset(panel);
+	if (rc) {
+		pr_err("[%s] failed to reset panel, rc=%d\n", panel->name, rc);
+		goto error_disable_gpio;
+	}
+
 	vdd->reset_time_64 = ktime_to_ms(ktime_get());
+#else
+	rc = dsi_panel_reset(panel);
+	if (rc) {
+		pr_err("[%s] failed to reset panel, rc=%d\n", panel->name, rc);
+		goto error_disable_gpio;
+	}
 #endif
 
 	goto exit;
@@ -604,8 +689,17 @@ static int dsi_panel_power_off(struct dsi_panel *panel)
 		usleep_range(vdd->dtsi_data.samsung_dsi_off_reset_delay,
 			vdd->dtsi_data.samsung_dsi_off_reset_delay);
 
-	if (gpio_is_valid(panel->reset_config.reset_gpio))
-		gpio_set_value(panel->reset_config.reset_gpio, 0);
+	/* Reset regulator off when aot_reset_regulator enabled */
+	if (vdd->aot_reset_regulator || vdd->aot_reset_regulator_late) {
+		rc = dsi_panel_reset_regulator(panel, false);
+		if (rc) {
+			pr_err("[%s] failed to off reset regulator, rc=%d\n",
+				panel->name, rc);
+		}
+	} else	/* AOT disable on factory binary. */
+		if (!vdd->aot_enable || vdd->is_factory_mode)
+			if (gpio_is_valid(panel->reset_config.reset_gpio))
+				gpio_set_value(panel->reset_config.reset_gpio, 0);
 #else
 	if (gpio_is_valid(panel->reset_config.reset_gpio))
 		gpio_set_value(panel->reset_config.reset_gpio, 0);
@@ -965,37 +1059,6 @@ error:
 	return rc;
 }
 
-static u32 dsi_panel_get_backlight(struct dsi_panel *panel)
-{
-	return panel->bl_config.bl_level;
-}
-
-static u32 interpolate(uint32_t x, uint32_t xa, uint32_t xb, uint32_t ya, uint32_t yb)
-{
-	return ya - (ya - yb) * (x - xa) / (xb - xa);
-}
-
-u32 dsi_panel_get_fod_dim_alpha(struct dsi_panel *panel)
-{
-	u32 brightness = dsi_panel_get_backlight(panel);
-	int len = ARRAY_SIZE(fod_dim_lut);
-	int i;
-
-	for (i = 0; i < len; i++)
-		if (fod_dim_lut[i].brightness >= brightness)
-			break;
-
-	if (i == 0)
-		return fod_dim_lut[i].dim_alpha;
-
-	if (i == len)
-		return fod_dim_lut[i - 1].dim_alpha;
-
-	return interpolate(brightness,
-			fod_dim_lut[i - 1].brightness, fod_dim_lut[i].brightness,
-			fod_dim_lut[i - 1].dim_alpha, fod_dim_lut[i].dim_alpha);
-}
-
 int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 {
 	int rc = 0;
@@ -1004,6 +1067,7 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 	if (panel->host_config.ext_bridge_num)
 		return 0;
 
+	pr_debug("backlight type:%d lvl:%d\n", bl->type, bl_lvl);
 	switch (bl->type) {
 	case DSI_BACKLIGHT_WLED:
 		rc = backlight_device_set_brightness(bl->raw_bd, bl_lvl);
@@ -3039,7 +3103,9 @@ static int dsi_panel_parse_gpios(struct dsi_panel *panel)
 		!panel->host_config.ext_bridge_num) {
 		rc = panel->reset_config.reset_gpio;
 		pr_err("[%s] failed get reset gpio, rc=%d\n", panel->name, rc);
+#if !defined(CONFIG_DISPLAY_SAMSUNG_LEGO) // For No panel reset project..
 		goto error;
+#endif
 	}
 
 	panel->reset_config.disp_en_gpio = utils->get_named_gpio(utils->data,
@@ -4969,6 +5035,17 @@ int dsi_panel_prepare(struct dsi_panel *panel)
 	 */
 	if (!panel->lp11_init)
 		msleep(5);
+#elif defined(CONFIG_DISPLAY_SAMSUNG_LEGO)
+	{
+		struct samsung_display_driver_data *vdd = panel->panel_private;
+
+		/* Call reset_regulator func here
+		 * if aot_reset_regulator_late is true
+		 * not pure aot_reset_regulator
+		 */
+		if (vdd->aot_reset_regulator_late)
+			rc = dsi_panel_reset_regulator(panel, true);
+	}
 #endif
 
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_PRE_ON);
@@ -5402,6 +5479,18 @@ int dsi_panel_enable(struct dsi_panel *panel)
 		}
 	}
 	if (!rc)
+		panel->panel_initialized = true;
+#elif defined(CONFIG_DISPLAY_SAMSUNG_LEGO)
+	/* skip cmds during splash booting : from 7225*/
+	if (vdd->skip_cmd_set_on_splash_enabled && vdd->samsung_splash_enabled) {
+		LCD_INFO("skip send DSI_CMD_SET_ON during splash booting\n");
+		rc = 0;
+	} else
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_ON);
+	if (rc)
+		pr_err("[%s] failed to send DSI_CMD_SET_ON cmds, rc=%d\n",
+		       panel->name, rc);
+	else
 		panel->panel_initialized = true;
 #else
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_ON);
