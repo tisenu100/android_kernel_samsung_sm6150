@@ -217,7 +217,7 @@ static DEFINE_MUTEX(bpf_verifier_lock);
 void bpf_verifier_vlog(struct bpf_verifier_log *log, const char *fmt,
 		       va_list args)
 {
-	unsigned int n;
+/*	unsigned int n;
 
 	n = vscnprintf(log->kbuf, BPF_VERIFIER_TMP_LOG_SIZE, fmt, args);
 	WARN_ONCE(n >= BPF_VERIFIER_TMP_LOG_SIZE - 1,
@@ -230,6 +230,7 @@ void bpf_verifier_vlog(struct bpf_verifier_log *log, const char *fmt,
 		log->len_used += n;
 	else
 		log->ubuf = NULL;
+*/
 }
 
 /* log_level controls verbosity level of eBPF verifier.
