@@ -217,7 +217,8 @@ static DEFINE_MUTEX(bpf_verifier_lock);
 void bpf_verifier_vlog(struct bpf_verifier_log *log, const char *fmt,
 		       va_list args)
 {
-/*	unsigned int n;
+/*
+	unsigned int n;
 
 	n = vscnprintf(log->kbuf, BPF_VERIFIER_TMP_LOG_SIZE, fmt, args);
 	WARN_ONCE(n >= BPF_VERIFIER_TMP_LOG_SIZE - 1,
@@ -6126,6 +6127,9 @@ static int do_check(struct bpf_verifier_env *env)
 					return -EACCES;
 				}
 
+				err = check_return_code(env);
+				if (err)
+					return err;
 process_bpf_exit:
 				err = pop_stack(env, &env->prev_insn_idx, &env->insn_idx);
 				if (err < 0) {
